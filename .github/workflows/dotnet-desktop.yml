@@ -50,14 +50,16 @@ jobs:
 
     strategy:
       matrix:
-        configuration: [Debug]
+        configuration: [Debug, Release]
 
     runs-on: windows-latest  # For a list of available runner types, refer to
                              # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
 
     env:
       Solution_Name: WebGoat.Net.sln                         # Replace with your solution name, i.e. MyWpfApp.sln.
-      Wap_Project_Path: D:\a\WebGoat.NET\WebGoat.NET\        # Replace with the path to your Wap project, i.e. MyWpf.App.Package\MyWpfApp.Package.wapproj.
+      Test_Project_Path: your-test-project-path                 # Replace with the path to your test project, i.e. MyWpfApp.Tests\MyWpfApp.Tests.csproj.
+      Wap_Project_Directory: your-wap-project-directory-name    # Replace with the Wap project directory relative to the solution, i.e. MyWpfApp.Package.
+      Wap_Project_Path: D:\a\WebGoat.NET\WebGoat.NET\                   # Replace with the path to your Wap project, i.e. MyWpf.App.Package\MyWpfApp.Package.wapproj.
 
     steps:
     - name: Checkout
@@ -86,7 +88,11 @@ jobs:
         Configuration: ${{ matrix.configuration }}
 
     # Decode the base 64 encoded pfx and save the Signing_Certificate
-    
+    - name: Decode the pfx
+      run: |
+        $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.Base64_Encoded_Pfx }}")
+        $certificatePath = Join-Path -Path $env:Wap_Project_Directory -ChildPath GitHubActionsWorkflow.pfx
+        [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
 
     # Create the app package by building and packaging the Windows Application Packaging project
     - name: Create the app package
@@ -98,7 +104,8 @@ jobs:
         Configuration: ${{ matrix.configuration }}
 
     # Remove the pfx
-    
+    - name: Remove the pfx
+      run: Remove-Item -path $env:Wap_Project_Directory\$env:Signing_Certificate
 
     # Upload the MSIX package: https://github.com/marketplace/actions/upload-a-build-artifact
     - name: Upload build artifacts
@@ -106,4 +113,21 @@ jobs:
       with:
         name: MSIX Package
         path: ${{ env.Wap_Project_Directory }}\AppPackages
+		
+	# Java 8 required by ScanCentral Client and FoD Uploader(Univeral CI Tool)																									- name: Setup Java
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      
+      # Prepare source+dependencies for upload. 
+      # Update PACKAGE_OPTS based on the ScanCentral Client documentation and your project's included tech stack(s).
+      #   ScanCentral Client will download dependencies for maven, gradle and msbuild projects.
+      #   For other build tools, add your build commands to download necessary dependencies and prepare according to Fortify on Demand Packaging documentation.																																											- name: Download Fortify ScanCentral Client																																										uses: fortify/gha-setup-scancentral-client@v2																																						- name: Package Code + Dependencies
+        run: scancentral package -bt msbuild -bf D:\a\WebGoat.NET\WebGoat.NET\WebGoat.Net.sln  -o package.zip
+				
+				# Start Fortify on Demand SAST scan and wait until results complete. Be sure to set secrets/variables for your FoD tenant. 																																																												- name: Download Fortify on Demand Universal CI Too																																						uses: fortify/gha-setup-fod-uploader@v1																																									- name: Perform SAST Scan																																																		run: java -jar ${env:FOD_UPLOAD_JAR} -z package.zip -aurl ${env:FOD_AURL} -purl ${env:FOD_PURL} -rid "${env:FOD_RELEASE_ID}" -tc "${env:FOD_TENANT}" -uc "${env:FOD_USER}" "${env:FOD_PAT}" -ep 2 -pp 0 -I 1 -apf													env:																																																											FOD_AURL: ${{ secrets.FOD_EIGHTBALL_API_URL }}																																						FOD_PURL: ${{ secrets.FOD_EIGHTBALL_BASE_URL }}																																						FOD_TENANT: ${{ secrets.FOD_EIGHTBALL_TENANT }}  																																					FOD_USER: ${{ secrets.FOD_EIGHTBALL_USER }}																																								FOD_PAT: ${{ secrets.FOD_EIGHTBALL_PAT }}																																									FOD_RELEASE_ID: ${{ secrets.FOD_EIGHTBALL_RELEASE_ID }} 
+      
+      # Once scan completes, pull SAST issues from Fortify on Demand and generate SARIF output.																	- name: Export results to GitHub-optimized SARIF																																						uses: fortify/gha-export-vulnerabilities@v1																																								with:																																																												fod_base_url: ${{ secrets.FOD_BASE_URL }}																																									fod_tenant: ${{ secrets.FOD_TENANT }}																																											fod_user: ${{ secrets.FOD_USER }}																																													fod_password: ${{ secrets.FOD_PAT }}																																											fod_release_id: ${{ secrets.FOD_RELEASE_ID }}
+      
+      # Import Fortify on Demand results to GitHub Security Code Scanning																												- name: Import results to GitHub Security Code Scanning																																			uses: github/codeql-action/upload-sarif@v1																																								with:																																																											sarif_file: ./gh-fortify-sast.sarif
         
