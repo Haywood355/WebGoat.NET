@@ -58,3 +58,4 @@ on:
           FOD_API_URL: "https://api.sandbox.fortify.com/"
           FOD_UPLOADER_OPTS: "-ep 2 -pp 0"
           FOD_UPLOADER_NOTES: 'Triggered by GitHub Actions (${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})'
+          
